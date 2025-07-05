@@ -1,0 +1,5 @@
+In Python you can write code
+In Python you can analyse data
+In Python you can create visualizations
+In Python you can create web applications
+In Python you can create games
