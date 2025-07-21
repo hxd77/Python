@@ -1,8 +1,11 @@
 import matplotlib.pyplot as plt
+input_values=[1,2,3,4,5]
 squares=[1,4,9,16,25]
+
+plt.style.use('seaborn-v0_8')#使用seaborn-v0_8样式
 fig,ax=plt.subplots()
 #变量fig表示由生成的一系列绘图构成的整个图形,变量ax表示图形中的绘图
-ax.plot(squares,linewidth=3)#参数linewidth决定了plot()绘制的线条的粗细
+ax.plot(input_values,squares,linewidth=3)#参数linewidth决定了plot()绘制的线条的粗细
 
 #设置图题并给坐标轴加上标签
 ax.set_title("Square Numbers",fontsize=24)
