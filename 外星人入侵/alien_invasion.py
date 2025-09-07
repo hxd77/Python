@@ -8,6 +8,7 @@ from alien import Alien
 from game_stats import GameStats
 from button import Button
 from time import sleep #导入sleep函数，以便飞船被外星人撞到后让游戏暂停一会
+from scoreboard import ScoreBoard
 
 class AlienInvasion:
     """管理游戏资源和行为的类"""
@@ -19,8 +20,9 @@ class AlienInvasion:
         self.screen = pygame.display.set_mode((self.settings.screen_width, self.settings.screen_height))
         pygame.display.set_caption("Alien Invasion")
 
-        #创建一个用于存储游戏统计信息的实例
+        #创建一个用于存储游戏统计信息的实例,并创建记分牌
         self.stats = GameStats(self)
+        self.sb=ScoreBoard(self)
 
         #创建飞船实例
         self.ship = Ship(self)
@@ -72,21 +74,30 @@ class AlienInvasion:
         """在玩家单击Play按钮时开始新游戏"""
         button_clicked=self.play_button.rect.collidepoint(mouse_pos)
         if button_clicked and not self.game_active:#检查鼠标的单击位置是否在Play按钮的rect内
-            #仅当玩家单击了Play按钮且游戏当前处于非活动状态时，游戏才会重新开始
-            #重置游戏的的统计信息
-            self.stats.reset_stats()
-            self.game_active=True
+            self._start_game()
 
-            #清空外星人列表和子弹列表
-            self.bullets.empty()
-            self.aliens.empty()
+    def _start_game(self):
+        """开始新游戏"""
+        # 仅当玩家单击了Play按钮且游戏当前处于非活动状态时，游戏才会重新开始
+        # 还原游戏设置
+        self.settings.initialize_dynamic_settings()
+        # 重置游戏的的统计信息
+        self.stats.reset_stats()
+        self.sb.prep_score()#重置游戏得分为0
+        self.sb.prep_level()
+        self.sb.prep_ship()
+        self.game_active = True
 
-            #创建一个新的外星舰队，并将飞船放在屏幕底部的中央
-            self._create_fleet()
-            self.ship.center_ship()
+        # 清空外星人列表和子弹列表
+        self.bullets.empty()
+        self.aliens.empty()
 
-            #隐藏鼠标光标
-            pygame.mouse.set_visible(False)
+        # 创建一个新的外星舰队，并将飞船放在屏幕底部的中央
+        self._create_fleet()
+        self.ship.center_ship()
+
+        # 隐藏鼠标光标
+        pygame.mouse.set_visible(False)
 
     def _check_keydown_events(self, event):
         """响应按键按下事件"""
@@ -133,15 +144,24 @@ class AlienInvasion:
         #如果是，就删除相应的子弹和外星人
         collisions=pygame.sprite.groupcollide(self.bullets, self.aliens, True,True)
         """将self.bulltets和self.aliens编组中的元素的rect进行碰撞检测,看是否重叠，如果重叠groupcollide()就在返回的字典中
-        添加一个键值对，键表示特定的子弹，值表示外星人，两个True表示子弹和外星人碰撞后都会消失"""
+        添加一个键值对，键表示特定的子弹，值表示列表，包含该子弹击落的外星人，两个True表示子弹和外星人碰撞后都会消失"""
+
+        if collisions:
+            for aliens in collisions.values():
+                self.stats.score+=self.settings.alien_points*len(aliens)
+            self.sb.prep_score()
+            self.sb.check_high_score()
 
         if not self.aliens: #如果aliens为空
             #删除现有的子弹并创建一个新的外星舰队
             self.bullets.empty() #清空子弹编组
             self._create_fleet()
-
-    """当有外星人撞到飞船时，将余下的飞船数减1，创建一个新的外星舰队，并将飞船重新放在屏幕底部的中央。
-    另外，让游戏暂停一会，让玩家意识到发生了碰撞，并在创建新的外星舰队重整旗鼓"""
+            self.settings.increase_speed()#在整个外星舰队被击落之后调用increase_speed()来加快比赛节奏
+            """当有外星人撞到飞船时，将余下的飞船数减1，创建一个新的外星舰队，并将飞船重新放在屏幕底部的中央。
+            另外，让游戏暂停一会，让玩家意识到发生了碰撞，并在创建新的外星舰队重整旗鼓"""
+            #提高等级
+            self.stats.level+=1
+            self.sb.prep_level()
 
     def _create_fleet(self):
         """创建一个外星舰队"""
@@ -163,8 +183,9 @@ class AlienInvasion:
         """创建一行外星人并将其放在当前行中"""
         new_alien = Alien(self)
         new_alien.x = x_position  # 这句话不能删掉，
-        """如果你没有 self.x = x_position，那么 self.x 这个属性在 Alien 类里可能会被初始化为默认值（比如0），
-这样每个外星人的 self.x 都是0，update 的时候全部都从0开始移动，导致所有外星人都重叠在一列上，看起来就像只有一列/一行。"""
+        """如果你没有 new_alien.x = x_position，那么 new_alien.x 这个属性在 Alien 类里可能会被初始化为默认值（比如0），
+        这样每个外星人的 self.x 都是0，update 的时候全部都从0开始移动，导致所有外星人都重叠在一列上，看起来就像只有一列/一行。
+        更新Ship类里面的__init__中的self.x=float(self.rect.x)"""
         new_alien.rect.x = x_position
         new_alien.rect.y = y_position
         self.aliens.add(new_alien)
@@ -239,6 +260,9 @@ class AlienInvasion:
 
         """blit将一张图像（Surface）贴到另一个 Surface 上，通常是把角色、背景、子弹等图片贴到游戏窗口上。"""
         """draw绘制基本几何图形（矩形、圆形、线条等），不需要图片文件，直接用颜色和坐标画图。"""
+
+        #显示得分
+        self.sb.show_score()
 
         #如果游戏处于非活动状态，就绘制Play按钮
         if not self.game_active:
