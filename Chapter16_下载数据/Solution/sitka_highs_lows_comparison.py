@@ -4,10 +4,8 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 
-
-path = Path('weather_data/sitka_weather_2021_simple.csv')
+path = Path('Chapter16_下载数据/Solution/weather_data/sitka_weather_2021_simple.csv')
 lines = path.read_text().splitlines()
-
 reader = csv.reader(lines)
 header_row = next(reader)
 

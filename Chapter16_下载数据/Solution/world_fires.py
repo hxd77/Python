@@ -4,7 +4,7 @@ import csv
 import plotly.express as px
 
 
-path = Path('eq_data/world_fires_1_day.csv')
+path = Path('Chapter16_下载数据/Solution/eq_data/world_fires_1_day.csv')
 lines = path.read_text().splitlines()
 
 reader = csv.reader(lines)
