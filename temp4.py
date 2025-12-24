@@ -1,152 +1,132 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
-import sys
+import matplotlib.ticker as ticker
+import platform
 
-# ==========================================
-# 1. 基础设置
-# ==========================================
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun']
-plt.rcParams['axes.unicode_minus'] = False
+def plot_rd_activity_structure(file_path):
+    # -----------------------------------------------------------
+    # 1. 字体与环境设置
+    # -----------------------------------------------------------
+    system_name = platform.system()
+    if system_name == "Windows":
+        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+    elif system_name == "Darwin":
+        plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'PingFang SC']
+    else:
+        plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'SimHei']
+    plt.rcParams['axes.unicode_minus'] = False
 
-# ==========================================
-# 2. 读取数据
-# ==========================================
-filename = "data.csv"
-print(f"正在读取文件: {filename} ...")
+    # -----------------------------------------------------------
+    # 2. 数据读取 (带错误处理)
+    # -----------------------------------------------------------
+    df = None
+    encodings = ['gb18030', 'gbk', 'utf-8']
+    for enc in encodings:
+        try:
+            df = pd.read_csv(file_path, skiprows=2, encoding=enc, engine='python')
+            break
+        except:
+            continue
+            
+    if df is None:
+        print("无法读取文件")
+        return
 
-try:
-    df = pd.read_csv(filename, encoding='GB18030', skiprows=2)
-except:
-    try:
-        df = pd.read_excel(filename, skiprows=2)
-    except Exception as e:
-        print(f"读取失败: {e}")
-        sys.exit(1)
+    # -----------------------------------------------------------
+    # 3. 数据清洗与提取
+    # -----------------------------------------------------------
+    # 定义 R&D 活动的三种类型
+    indicators = {
+        'basic': '研究与试验发展基础研究经费支出(亿元)',
+        'applied': '研究与试验发展应用研究经费支出(亿元)',
+        'dev': '研究与试验发展试验发展经费支出(亿元)'
+    }
+    
+    # 提取数据
+    df_plot = df[df['指标'].isin(indicators.values())].set_index('指标').T
+    
+    # 清洗索引
+    df_plot.index = df_plot.index.astype(str).str.replace('年', '', regex=False)
+    df_plot = df_plot[df_plot.index.str.isnumeric()] # 过滤非年份行
+    df_plot.index = df_plot.index.astype(int)
+    df_plot = df_plot.sort_index()
+    
+    # 转数值
+    for col in df_plot.columns:
+        df_plot[col] = pd.to_numeric(df_plot[col], errors='coerce')
+        
+    # 获取三列数据
+    s_basic = df_plot.get(indicators['basic'])
+    s_applied = df_plot.get(indicators['applied'])
+    s_dev = df_plot.get(indicators['dev'])
+    
+    # -----------------------------------------------------------
+    # 4. 绘图：堆叠柱状图 (Stacked Bar)
+    # -----------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(12, 7))
+    years = df_plot.index
+    bar_width = 0.6
+    
+    # 绘制堆叠柱
+    # 1. 底部：基础研究 (深色，强调根基)
+    p1 = ax.bar(years, s_basic, width=bar_width, label='基础研究 (Basic Research)', color='#1f77b4', zorder=10)
+    
+    # 2. 中间：应用研究 (中间色)
+    p2 = ax.bar(years, s_applied, width=bar_width, bottom=s_basic, 
+                label='应用研究 (Applied Research)', color='#2ca02c', zorder=10)
+    
+    # 3. 顶部：试验发展 (浅色/亮色，占比最大)
+    # bottom = basic + applied
+    p3 = ax.bar(years, s_dev, width=bar_width, bottom=s_basic + s_applied, 
+                label='试验发展 (Experimental Dev.)', color='#ff7f0e', zorder=10)
 
-# 数据清洗函数
-def get_clean_data(df, indicators):
-    mask = df['指标'].isin(indicators)
-    sub_df = df[mask].copy()
-    if sub_df.empty: return pd.DataFrame()
-    sub_df.set_index('指标', inplace=True)
-    sub_df = sub_df.T
-    sub_df = sub_df.iloc[::-1] # 倒序
-    try:
-        sub_df.index = sub_df.index.str.replace('年', '').astype(int)
-    except:
-        sub_df.index = sub_df.index.astype(str).str.extract(r'(\d+)')[0].astype(int)
-    return sub_df.apply(pd.to_numeric, errors='coerce')
+    # -----------------------------------------------------------
+    # 5. 添加高分细节：基础研究占比折线
+    # -----------------------------------------------------------
+    # 在很多分析中，"基础研究占比"是衡量创新质量的核心指标
+    # 我们用双轴把这个比例画出来，体现图表的深度
+    
+    total = s_basic + s_applied + s_dev
+    basic_ratio = (s_basic / total) * 100
+    
+    ax2 = ax.twinx()
+    p_line = ax2.plot(years, basic_ratio, color='#d62728', linewidth=2.5, 
+                      marker='o', markersize=8, label='基础研究占比 (%)', zorder=20)
+    
+    # -----------------------------------------------------------
+    # 6. 图表美化
+    # -----------------------------------------------------------
+    ax.set_title('R&D经费支出结构：基础研究 vs 应用研究 vs 试验发展', fontsize=16, pad=20, fontweight='bold')
+    ax.set_xlabel('年份', fontsize=12)
+    ax.set_ylabel('经费支出 (亿元)', fontsize=12, color='#333')
+    ax2.set_ylabel('基础研究投入占比 (%)', fontsize=12, color='#d62728', fontweight='bold')
+    
+    # 设置刻度格式
+    ax2.yaxis.set_major_formatter(ticker.PercentFormatter(decimals=1))
+    ax2.tick_params(axis='y', labelcolor='#d62728')
+    
+    # 添加数值标签（只在最新的年份添加，避免乱）
+    last_year = years.max()
+    last_basic_pct = basic_ratio[last_year]
+    ax2.annotate(f'{last_basic_pct:.2f}%', 
+                 xy=(last_year, last_basic_pct), 
+                 xytext=(0, 10), textcoords='offset points', 
+                 ha='center', color='#d62728', fontweight='bold')
 
-# ==========================================
-# 3. 准备数据
-# ==========================================
+    # 合并图例
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    # 放在图表外部或上方，避免遮挡
+    ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=10)
 
-# --- 数据组 A: 进出口贸易 ---
-trade_indicators = [
-    '高技术产品出口额(亿美元)', 
-    '高技术产品进口额(亿美元)'
-]
-df_trade = get_clean_data(df, trade_indicators).dropna()
-years_trade = df_trade.index
+    ax.grid(True, axis='y', linestyle='--', alpha=0.3)
+    plt.tight_layout()
+    
+    output_file = 'rd_internal_structure.png'
+    plt.savefig(output_file, dpi=300)
+    print(f"图表已保存: {output_file}")
+    plt.show()
 
-# --- 数据组 B: 雷达图综合实力 (选取6个最具代表性的维度) ---
-radar_indicators = [
-    '研究与试验发展经费支出(亿元)',       # 投入 - 钱
-    '研究与试验发展人员全时当量(万人年)', # 投入 - 人
-    '发表科技论文(万篇)',                 # 产出 - 理论
-    '发明专利申请数(项)',                 # 产出 - 技术
-    '高技术产品出口额(亿美元)',           # 产出 - 国际贸易
-    '技术市场成交额(亿元)'                # 产出 - 商业转化
-]
-
-# 简化雷达图标签 (去掉单位，避免拥挤)
-radar_labels = ['R&D经费', 'R&D人员', '科技论文', '发明专利', '高技术出口', '技术成交额']
-
-df_radar = get_clean_data(df, radar_indicators)
-# 只对比最早(2015)和最新(通常是2023，因为2024部分数据缺失)
-# 找到数据最全的最新年份
-valid_years = df_radar.dropna().index
-if len(valid_years) < 2:
-    print("数据不足以绘制雷达对比图")
-    sys.exit(1)
-
-year_start = valid_years.min() # 2015
-year_end = valid_years.max()   # 2023
-
-# 提取这两年的数据
-values_start = df_radar.loc[year_start].values
-values_end = df_radar.loc[year_end].values
-
-# 【关键步骤】数据归一化 (Normalization)
-# 因为经费是几万亿，论文是几万篇，单位不同不能直接画。
-# 我们把最新年份(2023)作为 100% (或者1.0)，计算2015年相对于2023年的比例。
-# 这样雷达图的形状才好看。
-max_values = np.maximum(values_start, values_end) # 取两者中的最大值做分母
-# 防止分母为0
-max_values[max_values == 0] = 1 
-
-values_start_norm = values_start / max_values
-values_end_norm = values_end / max_values
-
-# ==========================================
-# 4. 绘图
-# ==========================================
-fig = plt.figure(figsize=(14, 7))
-
-# --- 图 1: 高技术产品进出口顺差图 (Area Chart) ---
-ax1 = fig.add_subplot(1, 2, 1)
-
-exports = df_trade['高技术产品出口额(亿美元)']
-imports = df_trade['高技术产品进口额(亿美元)']
-
-# 画线
-ax1.plot(years_trade, exports, color='#E74C3C', linewidth=2, label='出口额 (卖钱)')
-ax1.plot(years_trade, imports, color='#3498DB', linewidth=2, label='进口额 (花钱)')
-
-# 填充区域 (ACCENT - Clarity: 顺差一目了然)
-ax1.fill_between(years_trade, exports, imports, 
-                 where=(exports >= imports), 
-                 interpolate=True, color='#E74C3C', alpha=0.1, label='贸易顺差')
-ax1.fill_between(years_trade, exports, imports, 
-                 where=(exports < imports), 
-                 interpolate=True, color='#3498DB', alpha=0.1, label='贸易逆差')
-
-ax1.set_title('中国高技术产品国际竞争力 (进出口)', fontsize=14, fontweight='bold')
-ax1.set_ylabel('金额 (亿美元)', fontsize=12)
-ax1.set_xlabel('年份', fontsize=12)
-ax1.legend(loc='upper left')
-ax1.grid(True, linestyle='--', alpha=0.3)
-
-
-# --- 图 2: 科技综合实力雷达图 (Radar Chart) ---
-ax2 = fig.add_subplot(1, 2, 2, polar=True) # 极坐标系
-
-# 闭合曲线 (把第一个点追加到最后)
-angles = np.linspace(0, 2*np.pi, len(radar_labels), endpoint=False).tolist()
-angles += angles[:1] # 闭合角度
-
-values_start_plot = np.concatenate((values_start_norm, [values_start_norm[0]]))
-values_end_plot = np.concatenate((values_end_norm, [values_end_norm[0]]))
-
-# 画图
-# 2015年 (起始)
-ax2.plot(angles, values_start_plot, 'o-', linewidth=2, color='#95A5A6', label=f'{year_start}年')
-ax2.fill(angles, values_start_plot, color='#95A5A6', alpha=0.25)
-
-# 2023年 (最新)
-ax2.plot(angles, values_end_plot, 'o-', linewidth=2, color='#2ECC71', label=f'{year_end}年')
-ax2.fill(angles, values_end_plot, color='#2ECC71', alpha=0.15)
-
-# 装饰雷达图
-ax2.set_thetagrids(np.degrees(angles[:-1]), radar_labels, fontsize=11)
-ax2.set_title(f'科技综合实力全维对比 ({year_start} vs {year_end})', fontsize=14, fontweight='bold', pad=20)
-ax2.set_ylim(0, 1.1) # 范围 0 到 110%
-ax2.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
-ax2.set_yticklabels(['20%', '40%', '60%', '80%', '100%'], color='gray', fontsize=8)
-ax2.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
-
-plt.tight_layout()
-plt.savefig('Tech_Trade_and_Radar.png', dpi=150)
-print("图表已生成: Tech_Trade_and_Radar.png")
-plt.show()
+if __name__ == "__main__":
+    file_path = "data.csv"
+    plot_rd_activity_structure(file_path)
