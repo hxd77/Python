@@ -1,176 +1,183 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
-import sys
+import matplotlib.ticker as ticker
+import platform
 
-# ==========================================
-# 1. 基础设置与配色
-# ==========================================
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun']
-plt.rcParams['axes.unicode_minus'] = False
-
-# 定义漏斗颜色 (从冷色到暖色，代表筛选过程)
-# 颜色顺序：浅蓝 -> 深蓝 -> 紫色 -> 深紫 -> 红 -> 深红 -> 金色
-FUNNEL_COLORS = [
-    '#AED6F1', # 论文 (海量)
-    '#5DADE2', # 成果
-    '#48C9B0', # 专利申请
-    '#1ABC9C', # 发明申请 (核心)
-    '#F1948A', # 专利授权
-    '#E74C3C', # 发明授权 (通过)
-    '#F1C40F'  # 国家奖项 (皇冠)
-]
-
-# ==========================================
-# 2. 读取与清洗数据
-# ==========================================
-filename = "data.csv"
-print(f"正在读取文件: {filename} ...")
-
-try:
-    df = pd.read_csv(filename, encoding='GB18030', skiprows=2)
-except:
-    try:
-        df = pd.read_excel(filename, skiprows=2)
-    except Exception as e:
-        print(f"读取失败: {e}")
-        sys.exit(1)
-
-# 数据清洗函数
-def get_clean_data(df, indicators):
-    mask = df['指标'].isin(indicators)
-    sub_df = df[mask].copy()
-    if sub_df.empty: return pd.DataFrame()
-    sub_df.set_index('指标', inplace=True)
-    sub_df = sub_df.T
-    sub_df = sub_df.iloc[::-1] # 倒序
-    try:
-        sub_df.index = sub_df.index.str.replace('年', '').astype(int)
-    except:
-        sub_df.index = sub_df.index.astype(str).str.extract(r'(\d+)')[0].astype(int)
-    return sub_df.apply(pd.to_numeric, errors='coerce')
-
-# ==========================================
-# 3. 提取漏斗所需的指标
-# ==========================================
-raw_indicators = [
-    '发表科技论文(万篇)', 
-    '科技成果登记数(项)', 
-    '专利申请数(项)', 
-    '发明专利申请数(项)', 
-    '专利申请授权数(项)',
-    '发明专利申请授权数(项)',
-    '国家技术发明奖(项)',
-    '国家科学技术进步奖(项)'
-]
-
-df_funnel = get_clean_data(df, raw_indicators)
-
-# 【关键处理 1】合并“国家奖项” 
-df_funnel['国家奖项(项)'] = df_funnel['国家技术发明奖(项)'].fillna(0) + df_funnel['国家科学技术进步奖(项)'].fillna(0)
-
-# 【关键处理 2】单位换算 (万篇 -> 篇)
-# 必须统一单位，否则论文数(几百)和专利数(几百万)没法画在一种图上
-df_funnel['发表科技论文(篇)'] = df_funnel['发表科技论文(万篇)'] * 10000
-
-# 定义最终的漏斗顺序 (逻辑顺序)
-funnel_steps = [
-    '发表科技论文(篇)', 
-    '科技成果登记数(项)', 
-    '专利申请数(项)', 
-    '发明专利申请数(项)', 
-    '专利申请授权数(项)', 
-    '发明专利申请授权数(项)',
-    '国家奖项(项)'
-]
-
-# 简化显示的标签
-step_labels = [
-    '发表科技论文', 
-    '科技成果登记', 
-    '专利申请总数', 
-    '发明专利申请', 
-    '专利授权总数', 
-    '发明专利授权', 
-    '国家级奖项'
-]
-
-# ==========================================
-# 4. 选取最新年份数据
-# ==========================================
-# 自动寻找这些指标都不为空的最新年份
-valid_df = df_funnel[funnel_steps].dropna()
-
-if valid_df.empty:
-    print("错误: 找不到所有指标都齐全的年份。尝试放宽条件...")
-    # 如果找不到齐全的，就用最新的一年，缺少的填0
-    target_year = df_funnel.index.max()
-    print(f"使用最新年份: {target_year} (部分数据可能缺失)")
-    values = df_funnel.loc[target_year, funnel_steps].fillna(0).values
-else:
-    target_year = valid_df.index.max()
-    print(f"使用数据最全的年份: {target_year}")
-    values = valid_df.loc[target_year, funnel_steps].values
-
-# ==========================================
-# 5. 绘制居中漏斗图
-# ==========================================
-fig, ax = plt.subplots(figsize=(12, 8))
-
-# 倒序数据，让第一步(论文)在最上面
-y_pos = np.arange(len(funnel_steps))[::-1] 
-
-# 计算居中绘图的参数
-# trick: 使用 barh，但是让左边缘(left)等于 -value/2，这样 bar 就会以 x=0 为中心
-left_pos = -values / 2
-
-# 绘制柱状图
-bars = ax.barh(y_pos, values, left=left_pos, height=0.6, 
-               color=FUNNEL_COLORS, edgecolor='white', alpha=0.9)
-
-# --- 装饰图表 ---
-# 隐藏坐标轴，只保留图形
-ax.axis('off')
-
-# 添加标题
-ax.set_title(f'中国科技创新转化漏斗 ({target_year}年)\n从科研产出到国家荣誉的筛选路径', 
-             fontsize=18, fontweight='bold', pad=20)
-
-# 添加标签和数值
-for i, (bar, label, value) in enumerate(zip(bars, step_labels, values)):
-    # 1. 在左侧标注 阶段名称
-    ax.text(-np.max(values)/1.6, bar.get_y() + bar.get_height()/2, label, 
-            ha='right', va='center', fontsize=12, fontweight='bold', color='#333')
+def plot_tech_stats(file_path):
+    """
+    读取数据并绘制高技术产品进出口与技术市场成交额的双轴复合图。
+    """
     
-    # 2. 在中间标注 具体数值
-    # 格式化数值：如果超过1万，用"万"作单位，否则直接显示
-    if value > 10000:
-        val_str = f"{value/10000:.1f}万"
-    else:
-        val_str = f"{int(value)}"
-        
-    ax.text(0, bar.get_y() + bar.get_height()/2, val_str, 
-            ha='center', va='center', fontsize=11, color='white' if i>2 else 'black', fontweight='bold')
+    # -----------------------------------------------------------
+    # 1. 设置中文字体 (根据不同操作系统尝试加载常用中文字体)
+    # -----------------------------------------------------------
+    system_name = platform.system()
+    if system_name == "Windows":
+        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+    elif system_name == "Darwin":  # macOS
+        plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'PingFang SC']
+    else:  # Linux/Server
+        plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'SimHei']
     
-    # 3. 在右侧标注 转化率 (相对于上一级的比例)
-    # 第一级不标转化率
-    if i > 0:
-        prev_value = values[i-1]
-        # 防止除以0
-        if prev_value > 0:
-            rate = (value / prev_value) * 100
-            # 画虚线连接
-            ax.plot([values[i-1]/2, values[i]/2], [y_pos[i-1], y_pos[i]], 'k--', alpha=0.1)
+    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+
+    # -----------------------------------------------------------
+    # 2. 数据读取与预处理 (增强版：自动处理编码错误与表头清洗)
+    # -----------------------------------------------------------
+    df = None
+    # 定义尝试的编码列表
+    # 修改：将 gb18030/gbk 放在最前面，因为很多中文 CSV 默认是 GBK，
+    # 且 utf-8 有时会错误地解码 GBK 而不报错（导致乱码）。
+    encodings_to_try = ['utf-8','gb18030', 'gbk', 'utf-8-sig', 'utf-8', 'utf-16']
+    
+    for encoding in encodings_to_try:
+        try:
+            # 尝试读取，使用 engine='python' 容错率更高
+            # 跳过前两行元数据
+            temp_df = pd.read_csv(file_path, skiprows=2, encoding=encoding, engine='python')
             
-            ax.text(np.max(values)/1.6, bar.get_y() + bar.get_height()/2, 
-                    f"转化率: {rate:.1f}%", 
-                    ha='left', va='center', fontsize=10, color='gray')
+            # --- 乱码检测逻辑 ---
+            # 有时候 utf-8 可以读取 gbk 文件不报错，但内容是乱码（如 'ָ'）。
+            # 我们检查列名中是否包含预期的中文字符（'指标' 或 '年'）。
+            # 如果列名里完全没有这两个字，很有可能是乱码，我们强制抛出异常以尝试下一个编码。
+            cols_str = "".join([str(c) for c in temp_df.columns])
+            if '指标' not in cols_str and '年' not in cols_str:
+                 # 这是一个假成功，实际上是乱码
+                 continue
+            
+            df = temp_df
+            print(f"成功使用 {encoding} 编码读取文件")
+            break
+        except Exception as e:
+            # 如果当前编码失败，尝试下一个
+            continue
 
-# 添加右下角水印
-ax.text(0.95, 0.05, '注：科技论文已换算为"篇"以统一单位', 
-        transform=ax.transAxes, ha='right', fontsize=10, color='gray')
+    if df is None:
+        print(f"错误：无法读取文件 {file_path}。请检查文件是否存在或是否损坏。")
+        return
 
-plt.tight_layout()
-plt.savefig('Innovation_Funnel_Chart.png', dpi=150)
-print("图表已生成: Innovation_Funnel_Chart.png")
-plt.show()
+    # --- 关键修复：清洗列名 ---
+    # 去除列名两端的空格
+    df.columns = df.columns.str.strip()
+    
+    # 检查 '指标' 列是否存在
+    if '指标' not in df.columns:
+        # 尝试查找包含 '指标' 的列名（处理特殊字符残留或OCR错误）
+        potential_cols = [c for c in df.columns if '指标' in str(c)]
+        if potential_cols:
+            print(f"警告：未找到精确的'指标'列，但找到 '{potential_cols[0]}'，将自动重命名。")
+            df.rename(columns={potential_cols[0]: '指标'}, inplace=True)
+        else:
+            print("错误：数据中未找到'指标'列。")
+            print(f"实际读取到的列名如下，请检查 skiprows 设置是否正确: \n{df.columns.tolist()}")
+            return
+
+    # 定义需要的指标
+    indicators = {
+        'import': '高技术产品进口额(亿美元)',
+        'export': '高技术产品出口额(亿美元)',
+        'market': '技术市场成交额(亿元)'
+    }
+
+    mask = df['指标'].isin(indicators.values())
+    df_subset = df[mask].copy()
+    
+    if df_subset.empty:
+        print("错误：未找到指定指标的数据。请检查CSV文件中的指标名称是否与代码中一致。")
+        return
+
+    # 转置数据：将年份作为索引 (行)，指标作为列
+    df_plot = df_subset.set_index('指标').T
+    df_plot.index.name = 'Year'
+
+    # 清洗索引：去除“年”字并转换为整数，以便排序
+    # 注意：原始数据列名如 '2024年', '2023年'...
+    # 使用 regex=False 避免警告
+    df_plot.index = df_plot.index.astype(str).str.replace('年', '', regex=False)
+    # 过滤掉非数字的行（如备注等）
+    df_plot = df_plot[df_plot.index.str.isnumeric()]
+    df_plot.index = df_plot.index.astype(int)
+    
+    # 按年份升序排列 (2015 -> 2024)
+    df_plot = df_plot.sort_index()
+
+    # 将数据列转换为数值类型 (处理可能的 NaN)
+    for col in df_plot.columns:
+        df_plot[col] = pd.to_numeric(df_plot[col], errors='coerce')
+
+    # 提取绘图所需的具体序列，方便调用
+    years = df_plot.index
+    # 使用 .get() 方法防止列名不匹配报错
+    s_import = df_plot.get(indicators['import'])
+    s_export = df_plot.get(indicators['export'])
+    s_market = df_plot.get(indicators['market'])
+
+    # -----------------------------------------------------------
+    # 3. 绘图逻辑
+    # -----------------------------------------------------------
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+
+    # --- 左轴 (Ax1)：高技术产品进出口 (堆叠柱状图) ---
+    bar_width = 0.5
+    
+    # 绘制进口 (底部柱子)
+    p1 = ax1.bar(years, s_import, width=bar_width, 
+                 label='高技术产品进口额', color='#729ece', alpha=0.85, zorder=10)
+    
+    # 绘制出口 (顶部柱子，bottom参数设为进口额)
+    p2 = ax1.bar(years, s_export, width=bar_width, bottom=s_import, 
+                 label='高技术产品出口额', color='#ff9e4a', alpha=0.85, zorder=10)
+
+    # 设置左轴标签和样式
+    ax1.set_xlabel('年份', fontsize=12, labelpad=10)
+    ax1.set_ylabel('高技术产品进出口额 (亿美元)', fontsize=12, color='#333333', fontweight='bold')
+    ax1.tick_params(axis='y', labelcolor='#333333')
+    ax1.set_title('2015-2024年 高技术产品贸易与技术市场成交额趋势对比', fontsize=16, pad=20)
+    
+    # 设置X轴刻度为所有年份 (确保显示完整)
+    ax1.set_xticks(years)
+    ax1.grid(True, axis='y', linestyle='--', alpha=0.3, zorder=0)
+
+    # --- 右轴 (Ax2)：技术市场成交额 (折线图) ---
+    ax2 = ax1.twinx()
+    
+    p3 = ax2.plot(years, s_market, color='#d62728', linewidth=2.5, marker='o', 
+                  markersize=8, label='技术市场成交额', zorder=20)
+
+    # 设置右轴标签和样式
+    ax2.set_ylabel('技术市场成交额 (亿元)', fontsize=12, color='#d62728', fontweight='bold', labelpad=10)
+    ax2.tick_params(axis='y', labelcolor='#d62728')
+
+    # --- 图例合并 ---
+    # 获取两个轴的图例句柄和标签
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    
+    # 合并显示在左上角
+    ax2.legend(lines1 + lines2, labels1 + labels2, loc='upper left', 
+               frameon=True, shadow=True, fancybox=True, fontsize=10)
+
+    # --- 添加数据标注 (可选，增强可读性) ---
+    # 为最新的有效数据添加数值标签
+    last_valid_idx = s_market.last_valid_index()
+    if last_valid_idx:
+        last_val = s_market.loc[last_valid_idx]
+        ax2.annotate(f'{last_val:.0f}', 
+                     xy=(last_valid_idx, last_val), 
+                     xytext=(0, 10), textcoords='offset points', 
+                     ha='center', color='#d62728', fontweight='bold')
+
+    plt.tight_layout()
+    
+    # 保存图片
+    output_filename = 'tech_trade_analysis.png'
+    plt.savefig(output_filename, dpi=300)
+    print(f"图表已成功保存为: {output_filename}")
+    
+    # 显示图表
+    plt.show()
+
+if __name__ == "__main__":
+    # 请确保csv文件在当前目录下，或者修改此路径
+    csv_file = 'data.csv'
+    plot_tech_stats(csv_file)
